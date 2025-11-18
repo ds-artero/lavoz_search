@@ -228,8 +228,8 @@ def generate_pdf_report(df_results, fig, search_term):
 
 st.set_page_config(layout="wide", page_title="La Voz de Galicia Search Scraper")
 
-st.title("📰 La Voz de Galicia Scraper App")
-st.markdown("Enter the name or term you wish to search for and generate a comprehensive report. **Monthly summaries are calculated from the 16th to the 15th of the following month.**")
+st.title("📰 Resumen de tus Artículos en La Voz de Galicia )
+st.markdown("Busca tu nombre! Y tendrás el resumen. **Los meses están calculados como 16-15 de cada mes: Ej: Octubre (16 Oct - 15 Nov).**")
 
 st.sidebar.header("🔍 Search Configuration")
 search_term = st.sidebar.text_input("NOMBRE A BUSCAR", value="CLAUDIA ZAPATER")
