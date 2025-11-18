@@ -8,6 +8,7 @@ from collections import defaultdict, OrderedDict
 import matplotlib.pyplot as plt
 import re
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 import io
 from matplotlib.backends.backend_pdf import PdfPages
 
@@ -38,7 +39,7 @@ def parse_date_and_normalize(date_str):
         except Exception:
             pass
             
-    # Fallback for relative dates
+    # Fallback for relative dates (we use today's date)
     if any(keyword in date_str.lower() for keyword in ['hoy', 'ayer', 'hora', 'minuto']):
         return datetime.now().strftime('%Y-%m-%d')
         
@@ -48,16 +49,37 @@ def parse_date_and_normalize(date_str):
 
 @st.cache_data
 def summarize_by_month(df):
-    """Processes DataFrame and summarizes the count by YYYY-MM."""
+    """
+    Processes DataFrame and summarizes the count by YYYY-MM, 
+    where a month runs from the 16th to the 15th of the next month.
+    """
     if df.empty:
         return pd.DataFrame({'Month': [], 'Count': []})
         
     monthly_counts = defaultdict(int)
+    
     for date_str in df['DATE_NORMALIZED']:
         if re.match(r'\d{4}-\d{2}-\d{2}', date_str):
-            month_key = date_str[:7] # YYYY-MM
-            monthly_counts[month_key] += 1
-            
+            try:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                
+                # --- NEW LOGIC: 16th to 15th Period ---
+                if date_obj.day > 15:
+                    # If date is 16th or later, it belongs to the NEXT month's period
+                    # Use relativedelta to reliably add one month, handling year end
+                    adjusted_date = date_obj + relativedelta(months=1)
+                else:
+                    # If date is 15th or earlier, it belongs to the CURRENT month's period
+                    adjusted_date = date_obj 
+                
+                # The month key is based on the ADJUSTED month (the month the period is named after)
+                month_key = adjusted_date.strftime('%Y-%m')
+                monthly_counts[month_key] += 1
+                
+            except ValueError:
+                # Handle cases where DATE_NORMALIZED is not a valid date string
+                pass
+
     sorted_items = OrderedDict(sorted(monthly_counts.items()))
     
     summary_df = pd.DataFrame(list(sorted_items.items()), columns=['Month', 'Count'])
@@ -79,7 +101,7 @@ def create_monthly_plot(summary_df, search_term):
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.bar(months, counts, color='#0079c1') 
     
-    ax.set_xlabel("Month/Year")
+    ax.set_xlabel("Month/Year (Period runs 16th to 15th)")
     ax.set_ylabel("Number of Unique Articles")
     ax.set_title(f"La Voz de Galicia: Article Count for '{search_term}'", fontsize=16)
     ax.tick_params(axis='x', rotation=45)
@@ -207,7 +229,7 @@ def generate_pdf_report(df_results, fig, search_term):
 st.set_page_config(layout="wide", page_title="La Voz de Galicia Search Scraper")
 
 st.title("📰 La Voz de Galicia Scraper App")
-st.markdown("Enter the name or term you wish to search for and generate a comprehensive report.")
+st.markdown("Enter the name or term you wish to search for and generate a comprehensive report. **Monthly summaries are calculated from the 16th to the 15th of the following month.**")
 
 st.sidebar.header("🔍 Search Configuration")
 search_term = st.sidebar.text_input("NOMBRE A BUSCAR", value="CLAUDIA ZAPATER")
@@ -243,7 +265,7 @@ if st.sidebar.button("Run Scraper", type="primary"):
 
         # --- Section 2: Summary Table ---
         summary_df = summarize_by_month(df_results)
-        st.subheader("🗓️ Article Summary per Month")
+        st.subheader("🗓️ Article Summary per Month (16th-to-15th Period)")
         st.dataframe(summary_df.sort_values(by='Month', ascending=False), use_container_width=True)
 
         # --- Section 3: Visualization ---
