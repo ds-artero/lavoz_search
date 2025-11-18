@@ -231,9 +231,11 @@ max_pages = st.sidebar.slider("Maximum Pages to Scan (10 items/page)", 1, 30, 10
 if 'df_results' not in st.session_state:
     st.session_state['df_results'] = pd.DataFrame()
 
-if st.sidebar.button("Run Scraper", type="primary"):
+# CAmbio aquí: "Run Scraper" a "🔍 Buscar"
+if st.sidebar.button("🔍 Buscar", type="primary"):
     
-    st.header("⏳ Scraping Results")
+    # CAmbio aquí: "Scraping Results" a "Buscando..."
+    st.header("⏳ Buscando...")
     st.info(f"Buscando: **{search_term}** a través de **{max_pages}** páginas...")
     
     # Placeholders for live progress
@@ -333,4 +335,4 @@ if not df_results.empty:
         )
         
 else:
-    st.info("Ingresa un término de búsqueda y haz clic en 'Run Scraper' para comenzar.")
+    st.info("Ingresa un término de búsqueda y haz clic en '🔍 Buscar' para comenzar.")
