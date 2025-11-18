@@ -228,7 +228,7 @@ def generate_pdf_report(df_results, fig, search_term):
 
 st.set_page_config(layout="wide", page_title="La Voz de Galicia Search Scraper")
 
-st.title("📰 Resumen de tus Artículos en La Voz de Galicia )
+st.title("📰 Resumen de tus Artículos en La Voz de Galicia" )
 st.markdown("Busca tu nombre! Y tendrás el resumen. **Los meses están calculados como 16-15 de cada mes: Ej: Octubre (16 Oct - 15 Nov).**")
 
 st.sidebar.header("🔍 Search Configuration")
