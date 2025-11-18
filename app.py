@@ -1,3 +1,4 @@
+import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -7,7 +8,6 @@ from collections import defaultdict, OrderedDict
 import matplotlib.pyplot as plt
 import re
 from datetime import datetime
-import csv
 import io
 from matplotlib.backends.backend_pdf import PdfPages
 
@@ -18,6 +18,7 @@ SEARCH_ENDPOINT = "https://www.lavozdegalicia.es/buscador/q/"
 DEFAULT_PAGE_SIZE = 10 
 
 # --- Date Parsing Helper ---
+@st.cache_data
 def parse_date_and_normalize(date_str):
     """Parses Spanish date strings (e.g., '18 de julio de 2025') into YYYY-MM-DD."""
     date_str = date_str.strip()
@@ -37,6 +38,7 @@ def parse_date_and_normalize(date_str):
         except Exception:
             pass
             
+    # Fallback for relative dates
     if any(keyword in date_str.lower() for keyword in ['hoy', 'ayer', 'hora', 'minuto']):
         return datetime.now().strftime('%Y-%m-%d')
         
@@ -44,6 +46,7 @@ def parse_date_and_normalize(date_str):
 
 # --- Data Summarization and Plotting ---
 
+@st.cache_data
 def summarize_by_month(df):
     """Processes DataFrame and summarizes the count by YYYY-MM."""
     if df.empty:
@@ -60,10 +63,15 @@ def summarize_by_month(df):
     summary_df = pd.DataFrame(list(sorted_items.items()), columns=['Month', 'Count'])
     return summary_df
 
+@st.cache_data
 def create_monthly_plot(summary_df, search_term):
     """Creates a Matplotlib bar chart of article count vs. month/year."""
     if summary_df.empty:
-        return None
+        # Create an empty figure to prevent errors
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.text(0.5, 0.5, "No data available for plotting.", horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
+        ax.axis('off')
+        return fig
         
     months = summary_df['Month']
     counts = summary_df['Count']
@@ -77,39 +85,104 @@ def create_monthly_plot(summary_df, search_term):
     ax.tick_params(axis='x', rotation=45)
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     
+    # Add count values on top of the bars
     for i, count in enumerate(counts):
         ax.text(i, count + 0.5, str(count), ha='center', va='bottom', fontsize=9)
     
     plt.tight_layout()
     return fig
 
-def generate_output_files(df_results, monthly_summary_df, fig, search_term):
-    """Generates the CSV and PDF files."""
-    
-    base_filename = f'lavoz_{search_term.replace(" ", "_").lower()}'
+# --- Main Scraping Logic (Adapted for Streamlit) ---
 
-    # 1. Generate CSV File
-    csv_filename = f'{base_filename}_articles.csv'
-    df_results.to_csv(csv_filename, index=False, encoding='utf-8')
-    print(f"\n✅ CSV file generated: {csv_filename}")
+def scrape_lavoz_main_search_post(search_text, max_page=5, page_size=DEFAULT_PAGE_SIZE, progress_bar=None, status_text=None):
+    """
+    Scrapes articles from the main La Voz de Galicia search page using POST requests.
+    """
+    all_articles_data = []
+    unique_links = set() 
     
-    # 2. Generate PDF Report
-    pdf_filename = f'{base_filename}_report.pdf'
+    base_form_data = {
+        'text': search_text,
+        'pageSize': str(page_size),
+        'sort': 'D0003_FECHAPUBLICACION desc',
+        'doctype': '', 'dateFrom': '', 'dateTo': '', 'edicion': '',
+        'formato': '', 'seccion': '', 'blog': '', 'autor': '',
+        'source': 'info',
+    }
     
-    # Create the PDF file with the plot and data table
-    with PdfPages(pdf_filename) as pdf:
+    articles_found = 0
+
+    for page_num in range(1, max_page + 1):
         
-        # Save the Graph
+        if status_text:
+            status_text.text(f"Fetching page {page_num}/{max_page}...")
+
+        form_data = base_form_data.copy()
+        form_data['pageNumber'] = str(page_num) 
+
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': SEARCH_ENDPOINT 
+            }
+            response = requests.post(SEARCH_ENDPOINT, headers=headers, data=form_data, timeout=10)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            article_containers = soup.select('article') 
+            
+            if not article_containers:
+                break
+                
+            for container in article_containers:
+                
+                link_tag = container.select_one('h1 a[href]')
+                if not (link_tag and link_tag.get('href')):
+                    continue 
+                
+                article_url = urljoin(DOMAIN, link_tag.get('href'))
+                title = link_tag.get_text(strip=True)
+                
+                date_tag = container.select_one('time.entry-date')
+                date_raw = date_tag.get('datetime', 'Date Not Found') if date_tag else 'Date Not Found'
+                normalized_date = parse_date_and_normalize(date_raw)
+
+                if article_url not in unique_links:
+                    unique_links.add(article_url)
+                    all_articles_data.append({
+                        'TITLE': title,
+                        'DATE_NORMALIZED': normalized_date,
+                        'DATE_RAW': date_raw,
+                        'URL': article_url,
+                    })
+                    articles_found += 1
+            
+            time.sleep(1.0) # Be polite
+
+        except requests.exceptions.RequestException as e:
+            st.error(f"Error fetching page {page_num}: {e}")
+            break
+            
+        if progress_bar:
+             progress_bar.progress(page_num / max_page)
+        
+    return pd.DataFrame(all_articles_data)
+
+def generate_pdf_report(df_results, fig, search_term):
+    """Generates the PDF file containing the plot and the data table."""
+    pdf_buffer = io.BytesIO()
+    
+    with PdfPages(pdf_buffer, keep_empty=False) as pdf:
+        # Add Graph to PDF
         pdf.savefig(fig)
         
-        # Save the Data Table
-        # We create a new figure for the table to handle dynamic size
-        fig_table, ax_table = plt.subplots(figsize=(10, 1 + len(df_results.index) * 0.3)) 
+        # Add Data Table to PDF
+        fig_table, ax_table = plt.subplots(figsize=(10, 0.5 + len(df_results.index) * 0.3)) # Dynamic height
         ax_table.axis('off')
         ax_table.axis('tight')
-        ax_table.set_title(f"Article Data for {search_term}", y=1.05)
+        ax_table.set_title(f"Scraped Articles for {search_term}", y=1.08)
         
-        # Prepare data for plotting table (only key columns)
         pdf_table_data = df_results[['TITLE', 'DATE_NORMALIZED', 'URL']].copy()
         pdf_table_data['TITLE'] = pdf_table_data['TITLE'].str.slice(0, 50) + '...'
         
@@ -125,119 +198,79 @@ def generate_output_files(df_results, monthly_summary_df, fig, search_term):
         
         pdf.savefig(fig_table)
         plt.close(fig_table)
+        plt.close(fig) # Close the Matplotlib figure
+            
+    return pdf_buffer.getvalue()
 
-    print(f"✅ PDF report generated: {pdf_filename}")
-    plt.close(fig) # Close the plot after saving
+# --- Streamlit Application Layout ---
+
+st.set_page_config(layout="wide", page_title="La Voz de Galicia Search Scraper")
+
+st.title("📰 La Voz de Galicia Scraper App")
+st.markdown("Enter the name or term you wish to search for and generate a comprehensive report.")
+
+st.sidebar.header("🔍 Search Configuration")
+search_term = st.sidebar.text_input("NOMBRE A BUSCAR", value="CLAUDIA ZAPATER")
+max_pages = st.sidebar.slider("Maximum Pages to Scan (10 items/page)", 1, 30, 10)
+
+if st.sidebar.button("Run Scraper", type="primary"):
     
-    return csv_filename, pdf_filename
-
-# --- Main Scraping Logic (Optimized for POST Request) ---
-
-def scrape_lavoz_main_search_post(search_text, max_page=5, page_size=DEFAULT_PAGE_SIZE):
-    """
-    Scrapes articles from the main La Voz de Galicia search page using POST requests.
-    """
-    all_articles_data = []
-    unique_links = set() 
+    st.header("⏳ Scraping Results")
+    st.info(f"Searching for: **{search_term}** across **{max_pages}** pages...")
     
-    base_form_data = {
-        'text': search_text,
-        'pageSize': str(page_size),
-        'sort': 'D0003_FECHAPUBLICACION desc',
-        'doctype': '', 'dateFrom': '', 'dateTo': '', 'edicion': '',
-        'formato': '', 'seccion': '', 'blog': '', 'autor': '',
-        'source': 'info',
-    }
-
-    for page_num in range(1, max_page + 1):
+    # Placeholders for live progress
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Run the scraper
+    df_results = scrape_lavoz_main_search_post(
+        search_term, 
+        max_pages, 
+        progress_bar=progress_bar, 
+        status_text=status_text
+    )
+    
+    progress_bar.empty()
+    status_text.success(f"✅ Scraping complete! Found {len(df_results)} unique articles.")
+    
+    if df_results.empty:
+        st.warning("No articles were found matching your search criteria.")
+    else:
         
-        print(f"--- Fetching page: {page_num} of {max_page} ---")
+        # --- Section 1: Data Table ---
+        st.subheader(f"📊 Scraped Articles ({len(df_results)} Total)")
+        st.dataframe(df_results, use_container_width=True)
 
-        form_data = base_form_data.copy()
-        form_data['pageNumber'] = str(page_num) 
+        # --- Section 2: Summary Table ---
+        summary_df = summarize_by_month(df_results)
+        st.subheader("🗓️ Article Summary per Month")
+        st.dataframe(summary_df.sort_values(by='Month', ascending=False), use_container_width=True)
 
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Referer': SEARCH_ENDPOINT 
-            }
-            response = requests.post(SEARCH_ENDPOINT, headers=headers, data=form_data, timeout=10)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # CONFIRMED SELECTOR
-            article_containers = soup.select('article') 
-            
-            if not article_containers:
-                print("No more articles found. Stopping.")
-                break
-                
-            articles_added = 0
-            for container in article_containers:
-                
-                # 1. Title and URL Extraction
-                link_tag = container.select_one('h1 a[href]')
-                if not (link_tag and link_tag.get('href')):
-                    continue 
-                
-                article_url = urljoin(DOMAIN, link_tag.get('href'))
-                title = link_tag.get_text(strip=True)
-                
-                # 2. Date Extraction
-                date_tag = container.select_one('time.entry-date')
-                date_raw = date_tag.get('datetime', 'Date Not Found') if date_tag else 'Date Not Found'
-                normalized_date = parse_date_and_normalize(date_raw)
-
-                # 3. Deduplication and Storage
-                if article_url not in unique_links:
-                    unique_links.add(article_url)
-                    all_articles_data.append({
-                        'TITLE': title,
-                        'DATE_NORMALIZED': normalized_date,
-                        'DATE_RAW': date_raw,
-                        'URL': article_url,
-                    })
-                    articles_added += 1
-            
-            print(f"-> Added {articles_added} unique articles. Total: {len(all_articles_data)}")
-            
-            time.sleep(1.0) 
-
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching page {page_num}: {e}. Stopping scrape.")
-            break
+        # --- Section 3: Visualization ---
+        st.subheader("📈 Monthly Publication Graph")
+        fig = create_monthly_plot(summary_df, search_term)
+        st.pyplot(fig)
         
-    return pd.DataFrame(all_articles_data)
+        # --- Section 4: Downloads ---
+        st.subheader("⬇️ Download Options")
+        
+        col1, col2 = st.columns(2)
 
-# --- Colab Execution Block ---
-
-# 1. Configuration (EDIT THESE VALUES)
-SEARCH_TERM = "CLAUDIA ZAPATER" 
-MAX_PAGES_TO_SCAN = 15 # Set this higher if needed, e.g., 50. 10 items per page.
-
-# 2. Run the scraper
-print("=" * 60)
-print(f"Starting Scraper for: '{SEARCH_TERM}' (up to {MAX_PAGES_TO_SCAN} pages)")
-print("=" * 60)
-
-df_results = scrape_lavoz_main_search_post(
-    search_text=SEARCH_TERM, 
-    max_page=MAX_PAGES_TO_SCAN
-) 
-
-# 3. Generate Summary & Plot
-if not df_results.empty:
-    monthly_summary_df = summarize_by_month(df_results)
-    fig = create_monthly_plot(monthly_summary_df, SEARCH_TERM)
-    
-    # 4. Generate Final Files (CSV and PDF)
-    csv_file, pdf_file = generate_output_files(df_results, monthly_summary_df, fig, SEARCH_TERM)
-    
-    print("\n--- Summary Report ---")
-    print(f"Total Unique Articles Found: {len(df_results)}")
-    print("\nMonthly Article Counts:")
-    print(monthly_summary_df)
-    
-else:
-    print("\n🛑 No articles were found for the specified search term.")
+        # CSV Download
+        csv_buffer = io.StringIO()
+        df_results.to_csv(csv_buffer, index=False)
+        col1.download_button(
+            label="Download Data as CSV",
+            data=csv_buffer.getvalue(),
+            file_name=f'lavoz_{search_term.replace(" ", "_").lower()}_articles.csv',
+            mime='text/csv'
+        )
+        
+        # PDF Download
+        pdf_data = generate_pdf_report(df_results, fig, search_term)
+        col2.download_button(
+            label="Download Report as PDF (Graph + Table)",
+            data=pdf_data,
+            file_name=f'lavoz_{search_term.replace(" ", "_").lower()}_report.pdf',
+            mime='application/pdf'
+        )
