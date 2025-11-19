@@ -263,8 +263,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">📰 Monitor La Voz (2025)</div>', unsafe_allow_html=True)
-st.markdown("**Todo rosa, todo 2025.** El sistema busca variantes y agrupa por mes fiscal (16-15).")
+st.markdown('<div class="main-title">📰 Artículos en La Voz )</div>', unsafe_allow_html=True)
+st.markdown("**Ahora, en rosa xd.** El sistema busca variantes y agrupa por mes fiscal (16-15).")
 
 # --- Sidebar ---
 st.sidebar.header("🔍 Configuración")
@@ -322,7 +322,7 @@ if not df_results.empty:
     
     # --- FILTERS SIDEBAR ---
     st.sidebar.markdown("---")
-    st.sidebar.markdown(":purple[**📅 Filtros Adicionales**]")
+    st.sidebar.markdown("[**📅 Filtros Adicionales**]")
     
     # Group Month Filter
     available_months = sorted(df_results['MONTH_GROUP'].dropna().unique(), reverse=True)
