@@ -255,8 +255,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">📰 Monitor La Voz (2025)</div>', unsafe_allow_html=True)
-st.markdown("**Todo rosa, todo 2025.** El sistema elimina automáticamente artículos anteriores al 01/01/2025.")
+st.markdown('<div class="main-title">📰 Atículos en lavozdegalicia.es </div>', unsafe_allow_html=True)
+st.markdown("**Todo rosa, xd.** El mes fiscal corresponde con 16-15 para el cálculo de las facturas.")
 
 # --- Sidebar ---
 st.sidebar.header("🔍 Configuración")
@@ -267,7 +267,7 @@ max_pages = st.sidebar.slider("Páginas máx. por variante", 1, 10, 5)
 if 'df_results' not in st.session_state:
     st.session_state['df_results'] = pd.DataFrame()
 
-if st.sidebar.button("🌺 BUSCAR (2025+)", type="primary"):
+if st.sidebar.button("🌺 BUSCAR ARTÍCULOS", type="primary"):
     
     variations = get_search_variations(search_input)
     
