@@ -158,9 +158,12 @@ def create_monthly_plot_plotly(summary_df, search_term):
 
 # --- Main Scraping Logic ---
 
+# --- Main Scraping Logic ---
+
 def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE_SIZE, progress_bar=None, status_text=None):
     """
     Scrapes articles for a LIST of search terms, removing duplicates.
+    Includes strict encoding fixes for Spanish characters.
     """
     all_articles_data = []
     unique_links = set() 
@@ -177,14 +180,12 @@ def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE
     current_step = 0
 
     for term in search_variations:
-        base_form_data['text'] = term # Update the search term
+        base_form_data['text'] = term 
         
         if status_text:
             status_text.markdown(f"🔎 Buscando variante: **'{term}'**...")
 
         for page_num in range(1, max_page + 1):
-            
-            # Update Progress
             current_step += 1
             if progress_bar:
                 progress_bar.progress(current_step / total_steps)
@@ -199,36 +200,43 @@ def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE
                 }
                 response = requests.post(SEARCH_ENDPOINT, headers=headers, data=form_data, timeout=10)
                 
-                # --- FIX: Force UTF-8 Encoding ---
-                # This fixes the weird characters/tildes issue
+                # --- ENCODING FIX EXPLANATION ---
+                # 1. We explicitly tell requests that the content is UTF-8.
                 response.encoding = 'utf-8' 
                 
-                response.raise_for_status()
-
-                soup = BeautifulSoup(response.content, 'html.parser')
+                # 2. We pass response.text (which uses the encoding above) to BS4.
+                # IMPORTANT: Do not pass response.content, or BS4 will try to guess the encoding and fail again.
+                soup = BeautifulSoup(response.text, 'html.parser')
                 
                 article_containers = soup.select('article') 
                 
                 if not article_containers:
-                    # No results for this term on this page, stop paging for this term
                     break
                     
                 for container in article_containers:
-                    
                     link_tag = container.select_one('h1 a[href]')
                     if not (link_tag and link_tag.get('href')):
                         continue 
                     
                     article_url = urljoin(DOMAIN, link_tag.get('href'))
                     
-                    # Skip if we already found this URL in a previous variation search
                     if article_url in unique_links:
                         continue
 
+                    # Double check cleaning just in case
                     title = link_tag.get_text(strip=True)
                     
+                    # Date parsing
                     date_tag = container.select_one('time.entry-date')
-                    date_raw = date_tag.get('datetime', 'Date Not Found') if date_tag else 'Date Not Found'
+                    date_raw = date_tag.get_text(strip=True) if date_tag else 'Date Not Found'
+                    
+                    # Sometimes the date is inside the datetime attribute, sometimes in text
+                    if date_tag and date_tag.has_attr('datetime'):
+                         date_raw_attr = date_tag['datetime']
+                         # Prefer the attribute if it looks like a full date, otherwise use text
+                         if len(date_raw_attr) > 5: 
+                             date_raw = date_raw_attr
+
                     normalized_date = parse_date_and_normalize(date_raw)
 
                     unique_links.add(article_url)
@@ -237,17 +245,16 @@ def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE
                         'DATE_NORMALIZED': normalized_date,
                         'DATE_RAW': date_raw,
                         'URL': article_url,
-                        'FOUND_VIA': term # Track which term found it first
+                        'FOUND_VIA': term 
                     })
             
-                time.sleep(0.5) # Polite delay
+                time.sleep(0.5) 
 
             except requests.exceptions.RequestException as e:
                 st.error(f"Error fetching data: {e}")
                 break
         
     return pd.DataFrame(all_articles_data)
-
 
 # --- Streamlit Application Layout ---
 
