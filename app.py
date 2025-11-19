@@ -19,21 +19,13 @@ DEFAULT_PAGE_SIZE = 10
 
 # --- Helper: Name Variations ---
 def get_search_variations(name_input):
-    """
-    Generates variations of a name.
-    Input: "CLAUDIA ZAPATER"
-    Output: ["CLAUDIA ZAPATER", "C. ZAPATER", "ZAPATER"]
-    """
+    """Generates variations of a name to broaden search."""
     name_input = name_input.strip()
-    variations = [name_input] # Always include the original
+    variations = [name_input] 
     
-    # Split by whitespace
     parts = name_input.split()
-    
-    # Only generate variations if we have at least 2 names (First + Last)
     if len(parts) >= 2:
         first_name = parts[0]
-        # Join the rest in case of compound surnames
         surname = " ".join(parts[1:]) 
         
         # Variation 1: Initial + Surname (e.g., "C. ZAPATER")
@@ -51,7 +43,6 @@ def get_search_variations(name_input):
 def calculate_fiscal_month(date_obj):
     """
     Determines the 'Fiscal Month' (YYYY-MM) based on the 16th-15th rule.
-    If date is > 15th, it belongs to the NEXT month.
     """
     try:
         if pd.isna(date_obj):
@@ -71,7 +62,7 @@ def calculate_fiscal_month(date_obj):
 # --- Date Parsing Helper ---
 @st.cache_data
 def parse_date_and_normalize(date_str):
-    """Parses Spanish date strings (e.g., '18 de julio de 2025') into YYYY-MM-DD."""
+    """Parses Spanish date strings."""
     date_str = date_str.strip()
     spanish_months = {
         'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
@@ -89,7 +80,6 @@ def parse_date_and_normalize(date_str):
         except Exception:
             pass
             
-    # Fallback for relative dates
     if any(keyword in date_str.lower() for keyword in ['hoy', 'ayer', 'hora', 'minuto']):
         return datetime.now().strftime('%Y-%m-%d')
             
@@ -99,19 +89,16 @@ def parse_date_and_normalize(date_str):
 
 @st.cache_data
 def summarize_by_group(df):
-    """
-    Summarizes the count by the pre-calculated MONTH_GROUP column.
-    """
     if df.empty or 'MONTH_GROUP' not in df.columns:
         return pd.DataFrame({'Month': [], 'Count': []})
             
     monthly_counts = df['MONTH_GROUP'].value_counts().sort_index()
-    
     summary_df = pd.DataFrame({'Month': monthly_counts.index, 'Count': monthly_counts.values})
     return summary_df
 
 @st.cache_data
 def create_monthly_plot_plotly(summary_df, search_term):
+    """Creates a Plotly bar chart with PINK and PURPLE theme."""
     if summary_df.empty:
         return None
     
@@ -122,48 +109,50 @@ def create_monthly_plot_plotly(summary_df, search_term):
         x='Month',
         y='Count',
         text='Count',
-        title=f"Artículos Publicados por Período Mensual (Búsqueda: {search_term})",
+        title=f"<b>Artículos 2025 por Mes Fiscal</b><br><span style='font-size: 12px; color: purple;'>Búsqueda: {search_term}</span>",
         labels={
-            "Count": "Número de Artículos Únicos",
-            "Month": "Mes/Año (Periodo: 16-15)"
+            "Count": "Artículos",
+            "Month": "Mes Fiscal"
         },
-        color_discrete_sequence=['#0079c1']
+        # --- THEME: PINK BAR ---
+        color_discrete_sequence=['#E91E63']  # Deep Pink
     )
     
+    # --- THEME: PURPLE AVERAGE LINE ---
     fig.add_hline(
         y=average_count,
-        line_dash="dot",
-        line_color="#d9534f",
-        annotation_text=f"Media: {average_count:.2f}",
+        line_dash="dash",
+        line_color="#9C27B0", # Purple
+        line_width=3,
+        annotation_text=f"<b>Promedio: {average_count:.2f}</b>",
         annotation_position="top right",
-        annotation_font_color="#d9534f"
+        annotation_font_color="#9C27B0"
     )
     
     fig.update_traces(
         textposition='outside',
-        marker_line_color='rgb(8,48,107)', 
-        marker_line_width=1.5, 
-        opacity=0.9
+        marker_line_color='#880E4F', # Darker Pink Border
+        marker_line_width=2, 
+        opacity=0.85
     )
     
     fig.update_layout(
         xaxis={'categoryorder':'category ascending'},
         hovermode="x unified",
-        template="plotly_white",
+        plot_bgcolor="rgba(0,0,0,0)", # Transparent background
         yaxis_title="Número de Artículos",
-        height=550
+        height=500,
+        title_font_color="#880E4F",
+        font=dict(family="Arial", size=12, color="#4A148C") # Purple text
     )
     
     return fig
 
 # --- Main Scraping Logic ---
 
-# --- Main Scraping Logic ---
-
 def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE_SIZE, progress_bar=None, status_text=None):
     """
-    Scrapes articles for a LIST of search terms, removing duplicates.
-    Includes strict encoding fixes for Spanish characters.
+    Scrapes articles with UTF-8 enforcement and strict cleaning.
     """
     all_articles_data = []
     unique_links = set() 
@@ -183,7 +172,7 @@ def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE
         base_form_data['text'] = term 
         
         if status_text:
-            status_text.markdown(f"🔎 Buscando variante: **'{term}'**...")
+            status_text.markdown(f"🌸 Buscando variante: **'{term}'**...")
 
         for page_num in range(1, max_page + 1):
             current_step += 1
@@ -200,14 +189,12 @@ def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE
                 }
                 response = requests.post(SEARCH_ENDPOINT, headers=headers, data=form_data, timeout=10)
                 
-                # --- ENCODING FIX EXPLANATION ---
-                # 1. We explicitly tell requests that the content is UTF-8.
+                # --- CRITICAL FIX: Force UTF-8 Encoding ---
                 response.encoding = 'utf-8' 
                 
-                # 2. We pass response.text (which uses the encoding above) to BS4.
-                # IMPORTANT: Do not pass response.content, or BS4 will try to guess the encoding and fail again.
+                response.raise_for_status()
+
                 soup = BeautifulSoup(response.text, 'html.parser')
-                
                 article_containers = soup.select('article') 
                 
                 if not article_containers:
@@ -223,19 +210,15 @@ def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE
                     if article_url in unique_links:
                         continue
 
-                    # Double check cleaning just in case
                     title = link_tag.get_text(strip=True)
                     
-                    # Date parsing
                     date_tag = container.select_one('time.entry-date')
                     date_raw = date_tag.get_text(strip=True) if date_tag else 'Date Not Found'
                     
-                    # Sometimes the date is inside the datetime attribute, sometimes in text
+                    # Prefer datetime attribute if available
                     if date_tag and date_tag.has_attr('datetime'):
-                         date_raw_attr = date_tag['datetime']
-                         # Prefer the attribute if it looks like a full date, otherwise use text
-                         if len(date_raw_attr) > 5: 
-                             date_raw = date_raw_attr
+                         if len(date_tag['datetime']) > 5:
+                             date_raw = date_tag['datetime']
 
                     normalized_date = parse_date_and_normalize(date_raw)
 
@@ -251,111 +234,114 @@ def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE
                 time.sleep(0.5) 
 
             except requests.exceptions.RequestException as e:
-                st.error(f"Error fetching data: {e}")
+                st.error(f"Error: {e}")
                 break
         
     return pd.DataFrame(all_articles_data)
 
+
 # --- Streamlit Application Layout ---
 
-st.set_page_config(layout="wide", page_title="La Voz de Galicia Search Scraper")
+st.set_page_config(layout="wide", page_title="La Voz Monitor 2025")
 
-st.title("📰 Monitor de Prensa - La Voz de Galicia" )
+# --- CSS Injection for Pink/Purple Theme ---
 st.markdown("""
-Busca un nombre y el sistema buscará automáticamente variantes (Ej: Nombre Apellido, N. Apellido, Apellido).
-**Los meses están calculados como un período fiscal: 16-15 del siguiente mes.**
-""")
+    <style>
+    .main-title {
+        color: #E91E63;
+        font-size: 3em;
+        font-weight: bold;
+    }
+    .sub-header {
+        color: #9C27B0;
+        font-weight: bold;
+    }
+    /* Customize dataframe headers slightly if possible via simple CSS */
+    [data-testid="stDataFrame"] div[data-testid="stVerticalBlock"] {
+        border-top: 2px solid #E91E63;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="main-title">📰 Monitor La Voz (2025)</div>', unsafe_allow_html=True)
+st.markdown("**Todo rosa, todo 2025.** El sistema busca variantes y agrupa por mes fiscal (16-15).")
 
 # --- Sidebar ---
 st.sidebar.header("🔍 Configuración")
-search_input = st.sidebar.text_input("NOMBRE O TÉRMINO A BUSCAR", value="CLAUDIA ZAPATER")
+search_input = st.sidebar.text_input("TÉRMINO A BUSCAR", value="CLAUDIA ZAPATER")
 max_pages = st.sidebar.slider("Páginas máx. por variante", 1, 10, 5)
 
 # --- Search Logic ---
 if 'df_results' not in st.session_state:
     st.session_state['df_results'] = pd.DataFrame()
 
-if st.sidebar.button("🔍 Buscar", type="primary"):
+if st.sidebar.button("🌺 BUSCAR (2025+)", type="primary"):
     
-    # 1. Generate Variations
     variations = get_search_variations(search_input)
     
-    st.header("⏳ Procesando Búsqueda Inteligente...")
-    st.info(f"Buscando las siguientes variantes: {', '.join([f'**{v}**' for v in variations])}")
+    st.markdown(f"<h3 class='sub-header'>⏳ Buscando variantes: {', '.join(variations)}...</h3>", unsafe_allow_html=True)
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # 2. Run Scraper
-    df_results_new = scrape_lavoz_recursive(
+    df_raw = scrape_lavoz_recursive(
         variations, 
         max_pages, 
         progress_bar=progress_bar, 
         status_text=status_text
     )
     
-    st.session_state['df_results'] = df_results_new
+    # --- FILTER: STRICTLY 2025 AND BEYOND ---
+    if not df_raw.empty:
+        # Ensure datetime
+        df_raw['DATE_OBJ'] = pd.to_datetime(df_raw['DATE_NORMALIZED'], errors='coerce')
+        df_raw.dropna(subset=['DATE_OBJ'], inplace=True)
+        
+        # Apply 2025 Filter
+        df_2025 = df_raw[df_raw['DATE_OBJ'] >= '2025-01-01'].copy()
+        
+        st.session_state['df_results'] = df_2025
+    else:
+        st.session_state['df_results'] = pd.DataFrame()
     
     progress_bar.empty()
-    status_text.success(f"✅ Completado. Encontrados {len(st.session_state['df_results'])} artículos únicos.")
+    
+    count = len(st.session_state['df_results'])
+    if count > 0:
+        status_text.markdown(f"✅ **¡Éxito!** Encontrados **{count}** artículos de 2025.")
+    else:
+        status_text.warning("⚠️ Se completó la búsqueda pero no se encontraron artículos en 2025.")
 
 # --- Results Display ---
 df_results = st.session_state['df_results']
 
 if not df_results.empty:
     
-    # 1. Pre-processing: Date & Fiscal Month
-    df_results['DATE_OBJ'] = pd.to_datetime(df_results['DATE_NORMALIZED'], errors='coerce')
-    df_results.dropna(subset=['DATE_OBJ'], inplace=True)
-    
-    # Calculate the Fiscal Month Column
+    # Calculate Fiscal Month
     df_results['MONTH_GROUP'] = df_results['DATE_OBJ'].apply(calculate_fiscal_month)
     
-    # --- FILTERS ---
+    # --- FILTERS SIDEBAR ---
     st.sidebar.markdown("---")
-    st.sidebar.subheader("📅 Filtros")
+    st.sidebar.markdown(":purple[**📅 Filtros Adicionales**]")
     
-    # Date Range Filter
-    min_date = df_results['DATE_OBJ'].min().date()
-    max_date = df_results['DATE_OBJ'].max().date()
-    
-    date_range = st.sidebar.date_input(
-        "Rango de Fechas",
-        [min_date, max_date],
-        min_value=min_date,
-        max_value=max_date
-    )
-    
-    # Group Month Filter (New)
+    # Group Month Filter
     available_months = sorted(df_results['MONTH_GROUP'].dropna().unique(), reverse=True)
     selected_months = st.sidebar.multiselect(
-        "Filtrar por Mes Fiscal (Grupo)",
+        "Filtrar por Mes Fiscal",
         options=available_months,
         default=available_months
     )
     
     # Apply Filters
-    mask = pd.Series(True, index=df_results.index)
-    
-    # Filter by Date Range
-    if len(date_range) == 2:
-        start_date, end_date = sorted(date_range)
-        end_date_time = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
-        mask = mask & (df_results['DATE_OBJ'] >= pd.to_datetime(start_date)) & (df_results['DATE_OBJ'] <= end_date_time)
-        
-    # Filter by Month Group
-    if selected_months:
-        mask = mask & (df_results['MONTH_GROUP'].isin(selected_months))
-        
+    mask = (df_results['MONTH_GROUP'].isin(selected_months))
     df_filtered = df_results[mask].copy()
 
     if df_filtered.empty:
-        st.warning("No hay resultados con los filtros actuales.")
+        st.warning("No hay resultados con los filtros seleccionados.")
     else:
         # --- Section 1: Data Table ---
-        st.subheader(f"📊 Listado Detallado ({len(df_filtered)} Artículos)")
+        st.markdown("<h3 class='sub-header'>📊 Tabla Detallada</h3>", unsafe_allow_html=True)
         
-        # Define column order including the new MONTH_GROUP
         display_cols = ['TITLE', 'DATE_NORMALIZED', 'MONTH_GROUP', 'URL']
         
         st.dataframe(
@@ -363,41 +349,43 @@ if not df_results.empty:
             use_container_width=True, 
             hide_index=True,
             column_config={
-                "URL": st.column_config.LinkColumn("Link"),
-                "MONTH_GROUP": st.column_config.TextColumn("Mes Fiscal (16-15)")
+                "URL": st.column_config.LinkColumn("Enlace"),
+                "MONTH_GROUP": st.column_config.TextColumn("Mes Fiscal (16-15)"),
+                "TITLE": st.column_config.TextColumn("Titular"),
+                "DATE_NORMALIZED": st.column_config.DateColumn("Fecha")
             }
         )
 
-        # --- Section 2: Summary Table ---
+        # --- Section 2: Summary & Plot ---
         summary_df = summarize_by_group(df_filtered)
         
-        col_summ_1, col_summ_2 = st.columns([1, 2])
+        col1, col2 = st.columns([1, 2])
         
-        with col_summ_1:
-            st.subheader("🗓️ Resumen Tabla")
+        with col1:
+            st.markdown(":purple[**Resumen Numérico**]")
             st.dataframe(
                 summary_df.sort_values(by='Month', ascending=False), 
                 use_container_width=True, 
                 hide_index=True
             )
             
-        with col_summ_2:
-             # --- Section 3: Visualization ---
-            st.subheader("📈 Gráfico Mensual")
+        with col2:
+            st.markdown(":purple[**Visualización**]")
             fig_plotly = create_monthly_plot_plotly(summary_df, search_input)
             if fig_plotly:
                 st.plotly_chart(fig_plotly, use_container_width=True)
 
-        # --- Section 4: Download ---
-        st.subheader("⬇️ Descargar Datos")
+        # --- Section 3: Download ---
+        st.markdown("---")
         csv_buffer = io.StringIO()
         df_filtered.to_csv(csv_buffer, index=False)
         st.download_button(
-            label="Descargar CSV Filtrado",
+            label="💜 Descargar CSV (Resultados Filtrados)",
             data=csv_buffer.getvalue(),
-            file_name=f'lavoz_report_{search_input.replace(" ", "_")}.csv',
-            mime='text/csv'
+            file_name=f'reporte_2025_{search_input.replace(" ", "_")}.csv',
+            mime='text/csv',
+            type="primary" # Makes the button stand out (usually red/pink in standard theme)
         )
         
 else:
-    st.info("Utiliza el panel lateral para iniciar una búsqueda.")
+    st.info("💜 Ingresa un nombre en la barra lateral para comenzar.")
