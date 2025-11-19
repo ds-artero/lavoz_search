@@ -80,9 +80,11 @@ def parse_date_and_normalize(date_str):
         except Exception:
             pass
             
+    # Fallback: If today/yesterday logic
     if any(keyword in date_str.lower() for keyword in ['hoy', 'ayer', 'hora', 'minuto']):
         return datetime.now().strftime('%Y-%m-%d')
             
+    # If strict ISO or other format, return as is for pandas to handle
     return date_str
 
 # --- Data Summarization and Plotting ---
@@ -152,7 +154,7 @@ def create_monthly_plot_plotly(summary_df, search_term):
 
 def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE_SIZE, progress_bar=None, status_text=None):
     """
-    Scrapes articles with UTF-8 enforcement and strict cleaning.
+    Scrapes articles with UTF-8 enforcement.
     """
     all_articles_data = []
     unique_links = set() 
@@ -189,7 +191,7 @@ def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE
                 }
                 response = requests.post(SEARCH_ENDPOINT, headers=headers, data=form_data, timeout=10)
                 
-                # --- CRITICAL FIX: Force UTF-8 Encoding ---
+                # --- ENCODING FIX ---
                 response.encoding = 'utf-8' 
                 
                 response.raise_for_status()
@@ -212,10 +214,10 @@ def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE
 
                     title = link_tag.get_text(strip=True)
                     
+                    # Date logic: Prefer datetime attribute, fallback to text
                     date_tag = container.select_one('time.entry-date')
                     date_raw = date_tag.get_text(strip=True) if date_tag else 'Date Not Found'
                     
-                    # Prefer datetime attribute if available
                     if date_tag and date_tag.has_attr('datetime'):
                          if len(date_tag['datetime']) > 5:
                              date_raw = date_tag['datetime']
@@ -247,35 +249,25 @@ st.set_page_config(layout="wide", page_title="La Voz Monitor 2025")
 # --- CSS Injection for Pink/Purple Theme ---
 st.markdown("""
     <style>
-    .main-title {
-        color: #E91E63;
-        font-size: 3em;
-        font-weight: bold;
-    }
-    .sub-header {
-        color: #9C27B0;
-        font-weight: bold;
-    }
-    /* Customize dataframe headers slightly if possible via simple CSS */
-    [data-testid="stDataFrame"] div[data-testid="stVerticalBlock"] {
-        border-top: 2px solid #E91E63;
-    }
+    .main-title { color: #E91E63; font-size: 3em; font-weight: bold; }
+    .sub-header { color: #9C27B0; font-weight: bold; }
+    [data-testid="stDataFrame"] div[data-testid="stVerticalBlock"] { border-top: 2px solid #E91E63; }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">📰 Artículos en La Voz de Galicia </div>', unsafe_allow_html=True)
-st.markdown("**Ahora, en rosa xd.** El sistema busca variantes y agrupa por mes fiscal (16-15).")
+st.markdown('<div class="main-title">📰 Monitor La Voz (2025)</div>', unsafe_allow_html=True)
+st.markdown("**Todo rosa, todo 2025.** El sistema elimina automáticamente artículos anteriores al 01/01/2025.")
 
 # --- Sidebar ---
 st.sidebar.header("🔍 Configuración")
 search_input = st.sidebar.text_input("TÉRMINO A BUSCAR", value="CLAUDIA ZAPATER")
-max_pages = st.sidebar.slider("Páginas máx. a Buscar", 1, 10, 5)
+max_pages = st.sidebar.slider("Páginas máx. por variante", 1, 10, 5)
 
 # --- Search Logic ---
 if 'df_results' not in st.session_state:
     st.session_state['df_results'] = pd.DataFrame()
 
-if st.sidebar.button("🌺 BUSCAR", type="primary"):
+if st.sidebar.button("🌺 BUSCAR (2025+)", type="primary"):
     
     variations = get_search_variations(search_input)
     
@@ -291,14 +283,16 @@ if st.sidebar.button("🌺 BUSCAR", type="primary"):
         status_text=status_text
     )
     
-    # --- FILTER: STRICTLY 2025 AND BEYOND ---
+    # --- FILTER: NUCLEAR OPTION FOR 2025 ---
     if not df_raw.empty:
-        # Ensure datetime
-        df_raw['DATE_OBJ'] = pd.to_datetime(df_raw['DATE_NORMALIZED'], errors='coerce')
+        # 1. Convert to Datetime (Handle ISO and European formats)
+        df_raw['DATE_OBJ'] = pd.to_datetime(df_raw['DATE_NORMALIZED'], dayfirst=True, errors='coerce')
+        
+        # 2. Drop Invalid Dates
         df_raw.dropna(subset=['DATE_OBJ'], inplace=True)
         
-        # Apply 2025 Filter
-        df_2025 = df_raw[df_raw['DATE_OBJ'] >= '2025-01-01'].copy()
+        # 3. Strict Integer Year Filter
+        df_2025 = df_raw[df_raw['DATE_OBJ'].dt.year >= 2025].copy()
         
         st.session_state['df_results'] = df_2025
     else:
@@ -308,9 +302,10 @@ if st.sidebar.button("🌺 BUSCAR", type="primary"):
     
     count = len(st.session_state['df_results'])
     if count > 0:
-        status_text.markdown(f"✅ **¡Éxito!** Encontrados **{count}** artículos de 2025.")
+        min_date_found = st.session_state['df_results']['DATE_OBJ'].min().strftime('%Y-%m-%d')
+        status_text.markdown(f"✅ **¡Éxito!** {count} artículos encontrados. (Fecha más antigua: {min_date_found})")
     else:
-        status_text.warning("⚠️ Se completó la búsqueda pero no se encontraron artículos en 2025.")
+        status_text.warning("⚠️ Se completó la búsqueda pero no se encontraron artículos publicados en 2025.")
 
 # --- Results Display ---
 df_results = st.session_state['df_results']
@@ -322,14 +317,26 @@ if not df_results.empty:
     
     # --- FILTERS SIDEBAR ---
     st.sidebar.markdown("---")
-    st.sidebar.markdown("[**📅 Filtros Adicionales**]")
+    st.sidebar.markdown(":purple[**📅 Filtros de Meses (2025)**]")
     
-    # Group Month Filter
-    available_months = sorted(df_results['MONTH_GROUP'].dropna().unique(), reverse=True)
+    # Group Month Filter setup
+    available_months = sorted(df_results['MONTH_GROUP'].dropna().unique())
+    
+    # Checkbox for Select All/Deselect All
+    # Use a unique key for the checkbox to ensure it resets when data changes
+    select_all_key = f"select_all_{len(available_months)}"
+    select_all = st.sidebar.checkbox("Seleccionar todos los meses", value=True, key=select_all_key)
+    
+    if select_all:
+        default_selection = available_months
+    else:
+        default_selection = []
+        
+    # Multiselect for individual months
     selected_months = st.sidebar.multiselect(
-        "Filtrar por Mes Fiscal",
+        "Meses seleccionados:",
         options=available_months,
-        default=available_months
+        default=default_selection
     )
     
     # Apply Filters
@@ -356,6 +363,8 @@ if not df_results.empty:
             }
         )
 
+        # ----------------------------------------------------------------------
+        
         # --- Section 2: Summary & Plot ---
         summary_df = summarize_by_group(df_filtered)
         
@@ -375,6 +384,8 @@ if not df_results.empty:
             if fig_plotly:
                 st.plotly_chart(fig_plotly, use_container_width=True)
 
+        # ----------------------------------------------------------------------
+
         # --- Section 3: Download ---
         st.markdown("---")
         csv_buffer = io.StringIO()
@@ -384,7 +395,7 @@ if not df_results.empty:
             data=csv_buffer.getvalue(),
             file_name=f'reporte_2025_{search_input.replace(" ", "_")}.csv',
             mime='text/csv',
-            type="primary" # Makes the button stand out (usually red/pink in standard theme)
+            type="primary"
         )
         
 else:
