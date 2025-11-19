@@ -263,13 +263,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">📰 Artículos en La Voz )</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">📰 Artículos en La Voz de Galicia </div>', unsafe_allow_html=True)
 st.markdown("**Ahora, en rosa xd.** El sistema busca variantes y agrupa por mes fiscal (16-15).")
 
 # --- Sidebar ---
 st.sidebar.header("🔍 Configuración")
 search_input = st.sidebar.text_input("TÉRMINO A BUSCAR", value="CLAUDIA ZAPATER")
-max_pages = st.sidebar.slider("Páginas máx. por variante", 1, 10, 5)
+max_pages = st.sidebar.slider("Páginas máx. a Buscar", 1, 10, 5)
 
 # --- Search Logic ---
 if 'df_results' not in st.session_state:
