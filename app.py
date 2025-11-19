@@ -5,18 +5,68 @@ import pandas as pd
 import time
 from urllib.parse import urljoin
 from collections import defaultdict, OrderedDict
-# Cambiamos plt por px y quitamos las dependencias de PDF (Matplotlib y PdfPages)
 import plotly.express as px 
 import re
-from datetime import datetime, date, timedelta # Importado timedelta para el filtro de fecha
+from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
-import io # Necesario para la descarga CSV
+import io
 
 # --- Configuration and Core Scraping Functions ---
 
 DOMAIN = "https://www.lavozdegalicia.es"
 SEARCH_ENDPOINT = "https://www.lavozdegalicia.es/buscador/q/"
 DEFAULT_PAGE_SIZE = 10
+
+# --- Helper: Name Variations ---
+def get_search_variations(name_input):
+    """
+    Generates variations of a name.
+    Input: "CLAUDIA ZAPATER"
+    Output: ["CLAUDIA ZAPATER", "C. ZAPATER", "ZAPATER"]
+    """
+    name_input = name_input.strip()
+    variations = [name_input] # Always include the original
+    
+    # Split by whitespace
+    parts = name_input.split()
+    
+    # Only generate variations if we have at least 2 names (First + Last)
+    if len(parts) >= 2:
+        first_name = parts[0]
+        # Join the rest in case of compound surnames
+        surname = " ".join(parts[1:]) 
+        
+        # Variation 1: Initial + Surname (e.g., "C. ZAPATER")
+        initial_var = f"{first_name[0]}. {surname}"
+        if initial_var not in variations:
+            variations.append(initial_var)
+            
+        # Variation 2: Surname only (e.g., "ZAPATER")
+        if surname not in variations:
+            variations.append(surname)
+            
+    return variations
+
+# --- Helper: Fiscal Month Calculator ---
+def calculate_fiscal_month(date_obj):
+    """
+    Determines the 'Fiscal Month' (YYYY-MM) based on the 16th-15th rule.
+    If date is > 15th, it belongs to the NEXT month.
+    """
+    try:
+        if pd.isna(date_obj):
+            return None
+            
+        if date_obj.day > 15:
+            # Belongs to next month
+            adjusted_date = date_obj + relativedelta(months=1)
+        else:
+            # Belongs to current month
+            adjusted_date = date_obj
+            
+        return adjusted_date.strftime('%Y-%m')
+    except:
+        return None
 
 # --- Date Parsing Helper ---
 @st.cache_data
@@ -39,7 +89,7 @@ def parse_date_and_normalize(date_str):
         except Exception:
             pass
             
-    # Fallback for relative dates (we use today's date)
+    # Fallback for relative dates
     if any(keyword in date_str.lower() for keyword in ['hoy', 'ayer', 'hora', 'minuto']):
         return datetime.now().strftime('%Y-%m-%d')
             
@@ -48,51 +98,23 @@ def parse_date_and_normalize(date_str):
 # --- Data Summarization and Plotting ---
 
 @st.cache_data
-def summarize_by_month(df):
+def summarize_by_group(df):
     """
-    Processes DataFrame and summarizes the count by YYYY-MM, 
-    where a month runs from the 16th to the 15th of the next month.
+    Summarizes the count by the pre-calculated MONTH_GROUP column.
     """
-    if df.empty:
+    if df.empty or 'MONTH_GROUP' not in df.columns:
         return pd.DataFrame({'Month': [], 'Count': []})
             
-    monthly_counts = defaultdict(int)
+    monthly_counts = df['MONTH_GROUP'].value_counts().sort_index()
     
-    for date_str in df['DATE_NORMALIZED']:
-        if re.match(r'\d{4}-\d{2}-\d{2}', date_str):
-            try:
-                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                
-                # --- NEW LOGIC: 16th to 15th Period ---
-                if date_obj.day > 15:
-                    # If date is 16th or later, it belongs to the NEXT month's period
-                    # Use relativedelta to reliably add one month, handling year end
-                    adjusted_date = date_obj + relativedelta(months=1)
-                else:
-                    # If date is 15th or earlier, it belongs to the CURRENT month's period
-                    adjusted_date = date_obj
-                
-                # The month key is based on the ADJUSTED month (the month the period is named after)
-                month_key = adjusted_date.strftime('%Y-%m')
-                monthly_counts[month_key] += 1
-                
-            except ValueError:
-                # Handle cases where DATE_NORMALIZED is not a valid date string
-                pass
-
-    sorted_items = OrderedDict(sorted(monthly_counts.items()))
-    
-    summary_df = pd.DataFrame(list(sorted_items.items()), columns=['Month', 'Count'])
+    summary_df = pd.DataFrame({'Month': monthly_counts.index, 'Count': monthly_counts.values})
     return summary_df
 
-# Nueva función de Plotting con Plotly Express
 @st.cache_data
 def create_monthly_plot_plotly(summary_df, search_term):
-    """Creates a Plotly bar chart of article count vs. month/year, including the average."""
     if summary_df.empty:
-        return None # Devuelve None si no hay datos
+        return None
     
-    # Calcular el promedio de artículos por mes
     average_count = summary_df['Count'].mean()
         
     fig = px.bar(
@@ -100,25 +122,23 @@ def create_monthly_plot_plotly(summary_df, search_term):
         x='Month',
         y='Count',
         text='Count',
-        title=f"Artículos Publicados por Período Mensual para: '{search_term}'",
+        title=f"Artículos Publicados por Período Mensual (Búsqueda: {search_term})",
         labels={
             "Count": "Número de Artículos Únicos",
-            "Month": "Mes/Año (Periodo: 16-15 del siguiente)"
+            "Month": "Mes/Año (Periodo: 16-15)"
         },
         color_discrete_sequence=['#0079c1']
     )
     
-    # Añadir la línea de promedio
     fig.add_hline(
         y=average_count,
         line_dash="dot",
-        line_color="#d9534f", # Rojo para destacar
-        annotation_text=f"Media: {average_count:.2f} artículos/mes",
+        line_color="#d9534f",
+        annotation_text=f"Media: {average_count:.2f}",
         annotation_position="top right",
         annotation_font_color="#d9534f"
     )
     
-    # Ajustes estéticos para un look más moderno
     fig.update_traces(
         textposition='outside',
         marker_line_color='rgb(8,48,107)', 
@@ -130,25 +150,22 @@ def create_monthly_plot_plotly(summary_df, search_term):
         xaxis={'categoryorder':'category ascending'},
         hovermode="x unified",
         template="plotly_white",
-        yaxis_title="Número de Artículos Únicos",
+        yaxis_title="Número de Artículos",
         height=550
     )
     
     return fig
 
-# Se han eliminado las funciones create_monthly_plot_matplotlib y generate_pdf_report.
+# --- Main Scraping Logic ---
 
-# --- Main Scraping Logic (Adapted for Streamlit) ---
-
-def scrape_lavoz_main_search_post(search_text, max_page=5, page_size=DEFAULT_PAGE_SIZE, progress_bar=None, status_text=None):
+def scrape_lavoz_recursive(search_variations, max_page=5, page_size=DEFAULT_PAGE_SIZE, progress_bar=None, status_text=None):
     """
-    Scrapes articles from the main La Voz de Galicia search page using POST requests.
+    Scrapes articles for a LIST of search terms, removing duplicates.
     """
     all_articles_data = []
     unique_links = set() 
     
     base_form_data = {
-        'text': search_text,
         'pageSize': str(page_size),
         'sort': 'D0003_FECHAPUBLICACION desc',
         'doctype': '', 'dateFrom': '', 'dateTo': '', 'edicion': '',
@@ -156,62 +173,78 @@ def scrape_lavoz_main_search_post(search_text, max_page=5, page_size=DEFAULT_PAG
         'source': 'info',
     }
     
-    articles_found = 0
+    total_steps = len(search_variations) * max_page
+    current_step = 0
 
-    for page_num in range(1, max_page + 1):
+    for term in search_variations:
+        base_form_data['text'] = term # Update the search term
         
         if status_text:
-            status_text.text(f"Fetching page {page_num}/{max_page}...")
+            status_text.markdown(f"🔎 Buscando variante: **'{term}'**...")
 
-        form_data = base_form_data.copy()
-        form_data['pageNumber'] = str(page_num) 
-
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Referer': SEARCH_ENDPOINT 
-            }
-            response = requests.post(SEARCH_ENDPOINT, headers=headers, data=form_data, timeout=10)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.content, 'html.parser')
+        for page_num in range(1, max_page + 1):
             
-            article_containers = soup.select('article') 
-            
-            if not article_containers:
-                break
-                
-            for container in article_containers:
-                
-                link_tag = container.select_one('h1 a[href]')
-                if not (link_tag and link_tag.get('href')):
-                    continue 
-                
-                article_url = urljoin(DOMAIN, link_tag.get('href'))
-                title = link_tag.get_text(strip=True)
-                
-                date_tag = container.select_one('time.entry-date')
-                date_raw = date_tag.get('datetime', 'Date Not Found') if date_tag else 'Date Not Found'
-                normalized_date = parse_date_and_normalize(date_raw)
+            # Update Progress
+            current_step += 1
+            if progress_bar:
+                progress_bar.progress(current_step / total_steps)
 
-                if article_url not in unique_links:
+            form_data = base_form_data.copy()
+            form_data['pageNumber'] = str(page_num) 
+
+            try:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Referer': SEARCH_ENDPOINT 
+                }
+                response = requests.post(SEARCH_ENDPOINT, headers=headers, data=form_data, timeout=10)
+                
+                # --- FIX: Force UTF-8 Encoding ---
+                # This fixes the weird characters/tildes issue
+                response.encoding = 'utf-8' 
+                
+                response.raise_for_status()
+
+                soup = BeautifulSoup(response.content, 'html.parser')
+                
+                article_containers = soup.select('article') 
+                
+                if not article_containers:
+                    # No results for this term on this page, stop paging for this term
+                    break
+                    
+                for container in article_containers:
+                    
+                    link_tag = container.select_one('h1 a[href]')
+                    if not (link_tag and link_tag.get('href')):
+                        continue 
+                    
+                    article_url = urljoin(DOMAIN, link_tag.get('href'))
+                    
+                    # Skip if we already found this URL in a previous variation search
+                    if article_url in unique_links:
+                        continue
+
+                    title = link_tag.get_text(strip=True)
+                    
+                    date_tag = container.select_one('time.entry-date')
+                    date_raw = date_tag.get('datetime', 'Date Not Found') if date_tag else 'Date Not Found'
+                    normalized_date = parse_date_and_normalize(date_raw)
+
                     unique_links.add(article_url)
                     all_articles_data.append({
                         'TITLE': title,
                         'DATE_NORMALIZED': normalized_date,
                         'DATE_RAW': date_raw,
                         'URL': article_url,
+                        'FOUND_VIA': term # Track which term found it first
                     })
-                    articles_found += 1
             
-            time.sleep(1.0) # Be polite
+                time.sleep(0.5) # Polite delay
 
-        except requests.exceptions.RequestException as e:
-            st.error(f"Error fetching page {page_num}: {e}")
-            break
-            
-        if progress_bar:
-             progress_bar.progress(page_num / max_page)
+            except requests.exceptions.RequestException as e:
+                st.error(f"Error fetching data: {e}")
+                break
         
     return pd.DataFrame(all_articles_data)
 
@@ -220,31 +253,35 @@ def scrape_lavoz_main_search_post(search_text, max_page=5, page_size=DEFAULT_PAG
 
 st.set_page_config(layout="wide", page_title="La Voz de Galicia Search Scraper")
 
-st.title("📰 Resumen de tus Artículos en La Voz de Galicia" )
-st.markdown("Busca un término y obtén un resumen de la frecuencia de publicación. **Los meses están calculados como un período fiscal: 16-15 del siguiente mes. Ej: Octubre (16 Oct - 15 Nov).**")
+st.title("📰 Monitor de Prensa - La Voz de Galicia" )
+st.markdown("""
+Busca un nombre y el sistema buscará automáticamente variantes (Ej: Nombre Apellido, N. Apellido, Apellido).
+**Los meses están calculados como un período fiscal: 16-15 del siguiente mes.**
+""")
 
-st.sidebar.header("🔍 Search Configuration")
-search_term = st.sidebar.text_input("NOMBRE O TÉRMINO A BUSCAR", value="CLAUDIA ZAPATER")
-max_pages = st.sidebar.slider("Maximum Pages to Scan (10 items/page)", 1, 30, 10)
+# --- Sidebar ---
+st.sidebar.header("🔍 Configuración")
+search_input = st.sidebar.text_input("NOMBRE O TÉRMINO A BUSCAR", value="CLAUDIA ZAPATER")
+max_pages = st.sidebar.slider("Páginas máx. por variante", 1, 10, 5)
 
-# Inicializar un DataFrame vacío en el estado de la sesión si no existe
+# --- Search Logic ---
 if 'df_results' not in st.session_state:
     st.session_state['df_results'] = pd.DataFrame()
 
-# CAmbio aquí: "Run Scraper" a "🔍 Buscar"
 if st.sidebar.button("🔍 Buscar", type="primary"):
     
-    # CAmbio aquí: "Scraping Results" a "Buscando..."
-    st.header("⏳ Buscando...")
-    st.info(f"Buscando: **{search_term}** a través de **{max_pages}** páginas...")
+    # 1. Generate Variations
+    variations = get_search_variations(search_input)
     
-    # Placeholders for live progress
+    st.header("⏳ Procesando Búsqueda Inteligente...")
+    st.info(f"Buscando las siguientes variantes: {', '.join([f'**{v}**' for v in variations])}")
+    
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Run the scraper
-    df_results_new = scrape_lavoz_main_search_post(
-        search_term, 
+    # 2. Run Scraper
+    df_results_new = scrape_lavoz_recursive(
+        variations, 
         max_pages, 
         progress_bar=progress_bar, 
         status_text=status_text
@@ -253,86 +290,107 @@ if st.sidebar.button("🔍 Buscar", type="primary"):
     st.session_state['df_results'] = df_results_new
     
     progress_bar.empty()
-    status_text.success(f"✅ Scraping completado. Encontrados {len(st.session_state['df_results'])} artículos únicos.")
+    status_text.success(f"✅ Completado. Encontrados {len(st.session_state['df_results'])} artículos únicos.")
 
-# Usamos el DataFrame de la sesión
+# --- Results Display ---
 df_results = st.session_state['df_results']
 
 if not df_results.empty:
     
-    # 1. Preparar el DataFrame para la filtración de fechas
-    # Convertir 'DATE_NORMALIZED' a datetime para poder filtrar
+    # 1. Pre-processing: Date & Fiscal Month
     df_results['DATE_OBJ'] = pd.to_datetime(df_results['DATE_NORMALIZED'], errors='coerce')
-    df_results.dropna(subset=['DATE_OBJ'], inplace=True) # Eliminar filas con fechas no válidas
+    df_results.dropna(subset=['DATE_OBJ'], inplace=True)
     
-    min_date_available = df_results['DATE_OBJ'].min().date()
-    max_date_available = df_results['DATE_OBJ'].max().date()
+    # Calculate the Fiscal Month Column
+    df_results['MONTH_GROUP'] = df_results['DATE_OBJ'].apply(calculate_fiscal_month)
     
-    # --- FILTRO DE FECHAS APLICADO AQUÍ ---
-    st.sidebar.subheader("📅 Filtrado Temporal")
+    # --- FILTERS ---
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📅 Filtros")
+    
+    # Date Range Filter
+    min_date = df_results['DATE_OBJ'].min().date()
+    max_date = df_results['DATE_OBJ'].max().date()
+    
     date_range = st.sidebar.date_input(
-        "Rango de Fechas de Publicación",
-        [min_date_available, max_date_available],
-        min_value=min_date_available,
-        max_value=max_date_available
+        "Rango de Fechas",
+        [min_date, max_date],
+        min_value=min_date,
+        max_value=max_date
     )
     
+    # Group Month Filter (New)
+    available_months = sorted(df_results['MONTH_GROUP'].dropna().unique(), reverse=True)
+    selected_months = st.sidebar.multiselect(
+        "Filtrar por Mes Fiscal (Grupo)",
+        options=available_months,
+        default=available_months
+    )
+    
+    # Apply Filters
+    mask = pd.Series(True, index=df_results.index)
+    
+    # Filter by Date Range
     if len(date_range) == 2:
         start_date, end_date = sorted(date_range)
-        # Asegúrate de incluir el día completo de la fecha final (hasta las 23:59:59)
         end_date_time = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
-
-        df_filtered = df_results[
-            (df_results['DATE_OBJ'] >= pd.to_datetime(start_date)) & 
-            (df_results['DATE_OBJ'] <= end_date_time)
-        ].copy()
-    else:
-        df_filtered = df_results.copy()
-
+        mask = mask & (df_results['DATE_OBJ'] >= pd.to_datetime(start_date)) & (df_results['DATE_OBJ'] <= end_date_time)
+        
+    # Filter by Month Group
+    if selected_months:
+        mask = mask & (df_results['MONTH_GROUP'].isin(selected_months))
+        
+    df_filtered = df_results[mask].copy()
 
     if df_filtered.empty:
-        st.warning("No hay artículos en el rango de fechas seleccionado. Intenta ampliar el rango.")
+        st.warning("No hay resultados con los filtros actuales.")
     else:
         # --- Section 1: Data Table ---
-        st.subheader(f"📊 Artículos Filtrados ({len(df_filtered)} Encontrados)")
-        # Solo mostrar las columnas relevantes en la tabla
-        st.dataframe(df_filtered[['TITLE', 'DATE_NORMALIZED', 'URL']], use_container_width=True, hide_index=True)
-
-        # --- Section 2: Summary Table ---
-        summary_df = summarize_by_month(df_filtered)
-        st.subheader("🗓️ Resumen Mensual (Período: 16-15)")
-        # Mejorar la tabla de resumen con un diseño de Streamlit
+        st.subheader(f"📊 Listado Detallado ({len(df_filtered)} Artículos)")
+        
+        # Define column order including the new MONTH_GROUP
+        display_cols = ['TITLE', 'DATE_NORMALIZED', 'MONTH_GROUP', 'URL']
+        
         st.dataframe(
-            summary_df.sort_values(by='Month', ascending=False), 
+            df_filtered[display_cols], 
             use_container_width=True, 
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "URL": st.column_config.LinkColumn("Link"),
+                "MONTH_GROUP": st.column_config.TextColumn("Mes Fiscal (16-15)")
+            }
         )
 
-        # --- Section 3: Visualization (PLOTLY) ---
-        st.subheader("📈 Gráfico de Publicaciones Mensuales")
-        fig_plotly = create_monthly_plot_plotly(summary_df, search_term)
+        # --- Section 2: Summary Table ---
+        summary_df = summarize_by_group(df_filtered)
         
-        if fig_plotly:
-             # Usamos Streamlit para mostrar el gráfico de Plotly
-            st.plotly_chart(fig_plotly, use_container_width=True)
-        else:
-            st.warning("No hay suficientes datos para generar el gráfico.")
+        col_summ_1, col_summ_2 = st.columns([1, 2])
+        
+        with col_summ_1:
+            st.subheader("🗓️ Resumen Tabla")
+            st.dataframe(
+                summary_df.sort_values(by='Month', ascending=False), 
+                use_container_width=True, 
+                hide_index=True
+            )
             
-        # --- Section 4: Downloads ---
-        st.subheader("⬇️ Opciones de Descarga")
-        
-        # Eliminamos la segunda columna y el botón de PDF, dejando solo el CSV
-        col1 = st.columns(1)[0]
+        with col_summ_2:
+             # --- Section 3: Visualization ---
+            st.subheader("📈 Gráfico Mensual")
+            fig_plotly = create_monthly_plot_plotly(summary_df, search_input)
+            if fig_plotly:
+                st.plotly_chart(fig_plotly, use_container_width=True)
 
-        # CSV Download (siempre el data frame original)
+        # --- Section 4: Download ---
+        st.subheader("⬇️ Descargar Datos")
         csv_buffer = io.StringIO()
-        df_results.to_csv(csv_buffer, index=False)
-        col1.download_button(
-            label="Download Data as CSV (Completa)",
+        df_filtered.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="Descargar CSV Filtrado",
             data=csv_buffer.getvalue(),
-            file_name=f'lavoz_{search_term.replace(" ", "_").lower()}_articles_full.csv',
+            file_name=f'lavoz_report_{search_input.replace(" ", "_")}.csv',
             mime='text/csv'
         )
         
 else:
-    st.info("Ingresa un término de búsqueda y haz clic en '🔍 Buscar' para comenzar.")
+    st.info("Utiliza el panel lateral para iniciar una búsqueda.")
