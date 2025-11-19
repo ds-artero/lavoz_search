@@ -275,7 +275,7 @@ max_pages = st.sidebar.slider("Páginas máx. por variante", 1, 10, 5)
 if 'df_results' not in st.session_state:
     st.session_state['df_results'] = pd.DataFrame()
 
-if st.sidebar.button("🌺 BUSCAR (2025+)", type="primary"):
+if st.sidebar.button("🌺 BUSCAR", type="primary"):
     
     variations = get_search_variations(search_input)
     
