@@ -317,7 +317,7 @@ if not df_results.empty:
     
     # --- FILTERS SIDEBAR ---
     st.sidebar.markdown("---")
-    st.sidebar.markdown(":purple[**📅 Filtros de Meses (2025)**]")
+    st.sidebar.markdown("[**📅 Filtros de Meses (2025)**]")
     
     # Group Month Filter setup
     available_months = sorted(df_results['MONTH_GROUP'].dropna().unique())
@@ -371,7 +371,7 @@ if not df_results.empty:
         col1, col2 = st.columns([1, 2])
         
         with col1:
-            st.markdown(":purple[**Resumen Numérico**]")
+            st.markdown("[**Resumen Numérico**]")
             st.dataframe(
                 summary_df.sort_values(by='Month', ascending=False), 
                 use_container_width=True, 
@@ -379,7 +379,7 @@ if not df_results.empty:
             )
             
         with col2:
-            st.markdown(":purple[**Visualización**]")
+            st.markdown("[**Visualización**]")
             fig_plotly = create_monthly_plot_plotly(summary_df, search_input)
             if fig_plotly:
                 st.plotly_chart(fig_plotly, use_container_width=True)
