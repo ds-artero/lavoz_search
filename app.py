@@ -48,8 +48,7 @@ def calculate_fiscal_month(date_obj):
         if pd.isna(date_obj):
             return None
             
-        if date_obj.day > 14
-        :
+        if date_obj.day > 14:
             # Belongs to next month
             adjusted_date = date_obj + relativedelta(months=1)
         else:
