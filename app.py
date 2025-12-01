@@ -42,13 +42,14 @@ def get_search_variations(name_input):
 # --- Helper: Fiscal Month Calculator ---
 def calculate_fiscal_month(date_obj):
     """
-    Determines the 'Fiscal Month' (YYYY-MM) based on the 16th-15th rule.
+    Determines the 'Fiscal Month' (YYYY-MM) based on the 15th-14th rule.
     """
     try:
         if pd.isna(date_obj):
             return None
             
-        if date_obj.day > 15:
+        if date_obj.day > 14
+        :
             # Belongs to next month
             adjusted_date = date_obj + relativedelta(months=1)
         else:
@@ -256,7 +257,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">📰 Artículos en lavozdegalicia.es </div>', unsafe_allow_html=True)
-st.markdown("**Todo rosa, xd.** El mes fiscal corresponde con 16-15 para el cálculo de las facturas.")
+st.markdown("**Todo rosa, xd.** El mes fiscal corresponde con 15-14 para el cálculo de las facturas.")
 
 # --- Sidebar ---
 st.sidebar.header("🔍 Configuración")
@@ -357,7 +358,7 @@ if not df_results.empty:
             hide_index=True,
             column_config={
                 "URL": st.column_config.LinkColumn("Enlace"),
-                "MONTH_GROUP": st.column_config.TextColumn("Mes Fiscal (16-15)"),
+                "MONTH_GROUP": st.column_config.TextColumn("Mes Fiscal (15-14)"),
                 "TITLE": st.column_config.TextColumn("Titular"),
                 "DATE_NORMALIZED": st.column_config.DateColumn("Fecha")
             }
