@@ -255,7 +255,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">📰 Atículos en lavozdegalicia.es </div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">📰 Artículos en lavozdegalicia.es </div>', unsafe_allow_html=True)
 st.markdown("**Todo rosa, xd.** El mes fiscal corresponde con 16-15 para el cálculo de las facturas.")
 
 # --- Sidebar ---
